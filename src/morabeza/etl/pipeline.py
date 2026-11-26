@@ -21,8 +21,9 @@ def ficheiros_pendentes(pasta: str, conn: sqlite3.Connection) -> list[Path]:
     """Ficheiros vendas_*.csv da pasta que ainda não estão em ficheiros_processados, por ordem de nome."""
     # TODO 1: lê os nomes já processados: conn.execute("SELECT nome FROM ficheiros_processados")
     #         devolve tuplos; guarda o primeiro elemento de cada um num conjunto.
+    feitos = {linha[0] for linha in conn.execute("SELECT nome FROM ficheiros_processados")}
     # TODO 2: devolve, ordenados, os Path(pasta).glob("vendas_*.csv") cujo .name não está no conjunto.
-    raise NotImplementedError("ficheiros_pendentes ainda não está feita")
+    return sorted(p for p in Path(pasta).glob("vendas_*.csv") if p.name not in feitos)
 
 
 def carregar_vendas(df: pd.DataFrame, conn: sqlite3.Connection) -> int:
@@ -42,7 +43,11 @@ def processar_ficheiro(caminho: Path, conn: sqlite3.Connection) -> int:
     # TODO 3: dentro de um bloco with conn: (uma transação), chama carregar_vendas e regista o ficheiro
     #         com INSERT INTO ficheiros_processados VALUES (?, ?, ?): nome, número de linhas e
     #         datetime.now(timezone.utc).isoformat(timespec="seconds"). Devolve o número de linhas.
-    raise NotImplementedError("processar_ficheiro ainda não está feita")
+    with conn:
+        n = carregar_vendas(df, conn)
+        conn.execute("INSERT INTO ficheiros_processados VALUES (?,?,?)",
+                     (caminho.name, n, datetime.now(timezone.utc).isoformat(timespec="seconds")))
+    return n 
 
 
 def correr(pasta: str, caminho_bd: str) -> dict:
@@ -53,8 +58,17 @@ def correr(pasta: str, caminho_bd: str) -> dict:
         # TODO 4: para cada ficheiro pendente, tenta processar_ficheiro.
         #         Se der KeyError ou ValueError: logger.error(...), junta o nome a "falhados" e continua.
         #         Se correr bem: logger.info("Carreguei %d vendas de %s", ...) e junta a "processados".
+        for caminho in ficheiros_pendentes(pasta, conn):
+            try:
+                n = processar_ficheiro(caminho, conn)
+            except (KeyError, ValueError) as erro:
+                logger.error("Falhou %s: %r", caminho.name, erro)
+                relatorio["falhados"].append(caminho.name)
+                continue
+            logger.info("Carreguei %d vendas de %s", n, caminho.name)
+            relatorio["processados"].append(caminho.name)
         # TODO 5: no fim, relatorio["linhas"] = contar(conn, "vendas").
-        raise NotImplementedError("correr ainda não está feita")
+        relatorio["linhas"] = contar(conn, "vendas")
     conn.close()
     return relatorio
 
